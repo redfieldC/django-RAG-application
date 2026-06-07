@@ -1,0 +1,167 @@
+# Django RAG Application
+
+A REST API that lets you upload PDF documents and ask questions about them using Retrieval-Augmented Generation (RAG). Built with Django, LangChain, ChromaDB, Groq (Llama 3), and HuggingFace Embeddings.
+
+---
+
+## How It Works
+
+```
+PDF Upload ──► Chunk Text ──► Embed (HuggingFace) ──► Store (ChromaDB)
+                                                              │
+Question ──► Embed Question ──► Similarity Search ──► Top Chunks ──► Groq LLM ──► Answer
+```
+
+1. A PDF is uploaded via the API and saved to disk
+2. LangChain's `PyPDFLoader` reads it and `RecursiveCharacterTextSplitter` breaks it into overlapping chunks
+3. `HuggingFaceEmbeddings` (all-MiniLM-L6-v2) converts each chunk into a vector — runs locally, no API needed
+4. Vectors are stored in ChromaDB with a unique collection per document
+5. On query, the question is embedded and ChromaDB returns the top 4 most similar chunks
+6. Those chunks are injected into a prompt and sent to Groq's Llama 3 to generate a grounded answer
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend Framework | Django 4.2 + Django REST Framework |
+| RAG Orchestration | LangChain |
+| Embeddings | HuggingFace sentence-transformers (all-MiniLM-L6-v2) |
+| Vector Store | ChromaDB |
+| LLM | Groq API (llama-3.3-70b-versatile) |
+| PDF Parsing | PyPDF |
+| Database | SQLite (document metadata) |
+
+---
+
+## Project Structure
+
+```
+django-RAG-application/
+├── rag/
+│   ├── models.py        ← Document model (UUID primary key)
+│   ├── serializers.py   ← Input validation
+│   ├── views.py         ← API endpoints
+│   ├── services.py      ← LangChain RAG pipeline
+│   └── urls.py          ← Route mapping
+├── ragapi/
+│   ├── settings.py
+│   └── urls.py
+├── requirements.txt
+└── manage.py
+```
+
+---
+
+## Setup
+
+### Prerequisites
+- Python 3.9+
+- A free Groq API key from [console.groq.com](https://console.groq.com)
+
+### Installation
+
+```bash
+git clone https://github.com/redfieldC/django-RAG-application.git
+cd django-RAG-application
+
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Mac/Linux
+
+pip install -r requirements.txt
+```
+
+### Environment Variables
+
+Create a `.env` file in the root directory:
+
+```
+GROQ_API_KEY=your_groq_api_key_here
+HF_HOME=C:/Users/YourUsername/.cache/huggingface
+HF_HUB_DISABLE_SYMLINKS_WARNING=1
+```
+
+### Run
+
+```bash
+python manage.py migrate
+python manage.py runserver
+```
+
+The first request will download the HuggingFace embedding model (~90MB). Subsequent requests use the cached version.
+
+---
+
+## API Endpoints
+
+### Upload a Document
+`POST /api/documents/upload/`
+
+**Body** (form-data):
+| Key | Type | Value |
+|---|---|---|
+| title | Text | Your document title |
+| file | File | A PDF file (max 10MB) |
+
+**Response** `201 Created`:
+```json
+{
+    "message": "Document uploaded and processed successfully.",
+    "document": {
+        "id": "4c95b752-2b6b-497c-95b0-bcdb2a24fc15",
+        "title": "Table Tennis",
+        "chunk_count": 5,
+        "uploaded_at": "2026-06-07T07:53:35.039836Z"
+    }
+}
+```
+
+---
+
+### Query a Document
+`POST /api/query/`
+
+**Body** (JSON):
+```json
+{
+    "question": "What are the basic rules of table tennis?",
+    "document_id": "4c95b752-2b6b-497c-95b0-bcdb2a24fc15"
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+    "document": "Table Tennis",
+    "question": "What are the basic rules of table tennis?",
+    "answer": "The basic rules of table tennis include..."
+}
+```
+
+---
+
+### List All Documents
+`GET /api/documents/`
+
+**Response** `200 OK`:
+```json
+[
+    {
+        "id": "4c95b752-2b6b-497c-95b0-bcdb2a24fc15",
+        "title": "Table Tennis",
+        "chunk_count": 5,
+        "uploaded_at": "2026-06-07T07:53:35.039836Z"
+    }
+]
+```
+
+---
+
+## Notes
+
+- Only PDF files are supported
+- Each document gets its own ChromaDB collection identified by a UUID
+- Embeddings run locally — only the LLM call hits an external API (Groq)
+- The retriever fetches the top 4 most semantically relevant chunks per query
