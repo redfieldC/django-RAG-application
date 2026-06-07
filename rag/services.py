@@ -34,13 +34,11 @@ def ingest_document(file_path: str, collection_name: str) -> int:
     Returns number of chunks created.
     """
     import os
-    print(f"FILE PATH: {file_path}")
-    print(f"FILE EXISTS: {os.path.exists(file_path)}")
+    
     # Step 1: Load the PDF
     file_path = str(Path(file_path).resolve())  
 
-    print(f"RESOLVED PATH: {file_path}")
-    print(f"RESOLVED EXISTS: {os.path.exists(file_path)}")
+    
     loader = PyPDFLoader(file_path)
     documents = loader.load()
 
