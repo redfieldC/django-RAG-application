@@ -1,0 +1,8 @@
+# .gitignore
+.env
+venv/
+__pycache__/
+chroma_db/
+*.pyc
+db.sqlite3
+media/
