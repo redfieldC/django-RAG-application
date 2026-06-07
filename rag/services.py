@@ -8,11 +8,6 @@ from langchain_chroma import Chroma
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from pathlib import Path
-os.environ.setdefault('HF_HOME', r'C:\Users\drpvp\.cache\huggingface')
-os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')
-import os
-os.environ['TRANSFORMERS_CACHE'] = r'C:\Users\drpvp\.cache\huggingface\transformers'
-os.environ['HF_HOME'] = r'C:\Users\drpvp\.cache\huggingface'
 
 
 
@@ -23,8 +18,7 @@ def get_embeddings():
     """
     
     return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        cache_folder=r"C:\Users\drpvp\.cache\huggingface\sentence_transformers"
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
 
@@ -33,7 +27,7 @@ def ingest_document(file_path: str, collection_name: str) -> int:
     Load PDF, split into chunks, embed and store in ChromaDB.
     Returns number of chunks created.
     """
-    import os
+    
     
     # Step 1: Load the PDF
     file_path = str(Path(file_path).resolve())  
