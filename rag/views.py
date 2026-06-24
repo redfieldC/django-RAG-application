@@ -83,7 +83,7 @@ class QueryView(APIView):
             )
 
         try:
-            answer = query_document(question, doc.collection_name)
+            response  = query_document(question, doc.collection_name)
         except Exception as e:
             return Response(
                 {"error": f"Query failed: {str(e)}"},
@@ -93,5 +93,6 @@ class QueryView(APIView):
         return Response({
             "document": doc.title,
             "question": question,
-            "answer": answer
+            "answer": response["answer"],
+            "sources": response["sources"]
         })

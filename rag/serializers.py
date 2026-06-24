@@ -24,3 +24,4 @@ class DocumentUploadSerializer(serializers.Serializer):
 class QuerySerializer(serializers.Serializer):
     question = serializers.CharField(max_length=1000)
     document_id = serializers.UUIDField()
+    filename = serializers.CharField(required=False)

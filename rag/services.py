@@ -7,6 +7,7 @@ from langchain_groq import ChatGroq
 from langchain_chroma import Chroma
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain.retrievers.multi_query import MultiQueryRetriever
 from pathlib import Path
 
 
@@ -35,6 +36,9 @@ def ingest_document(file_path: str, collection_name: str) -> int:
     
     loader = PyPDFLoader(file_path)
     documents = loader.load()
+    for doc in documents:
+        doc.metadata["filename"] = os.path.basename(file_path)
+        doc.metadata["collection_name"] = collection_name
 
     # Step 2: Split into chunks
     # chunk_size=1000 means ~1000 characters per chunk
@@ -57,7 +61,7 @@ def ingest_document(file_path: str, collection_name: str) -> int:
     return len(chunks)
 
 
-def query_document(question: str, collection_name: str) -> str:
+def query_document(question: str, collection_name: str, filename: str = None) -> dict:
     """
     Query against stored document chunks using RAG.
     Returns LLM answer based on retrieved context.
@@ -96,14 +100,56 @@ def query_document(question: str, collection_name: str) -> str:
         input_variables=["context", "question"]
     )
 
+    search_kwargs = {"k": 4}
+
+    if filename:
+        search_kwargs["filter"] = {
+            "filename": filename
+        }
+
     # Step 4: Build RAG chain
     # retriever fetches top 4 most relevant chunks for the question
+
+    retriever = vectorstore.as_retriever(
+        search_type="mmr",
+        search_kwargs={
+            **search_kwargs,
+            "fetch_k": 20,
+            "lambda_mult": 0.5
+        }
+    )
+
+    multi_query_retriever = MultiQueryRetriever.from_llm(
+        retriever=retriever,
+        llm=llm
+    )
+        
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",  # "stuff" = put all chunks into one prompt
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 4}),
-        chain_type_kwargs={"prompt": prompt}
+        retriever=multi_query_retriever,
+        chain_type_kwargs={"prompt": prompt},
+        return_source_documents=True
     )
 
     result = qa_chain.invoke({"query": question})
-    return result["result"]
+    sources = []
+
+    for doc in result["source_documents"]:
+        sources.append({
+            "filename": doc.metadata.get("filename", "Unknown"),
+            "page": doc.metadata.get("page", "Unknown"),
+            "content": doc.page_content[:200]
+        })
+        
+    pages = sorted(
+        set(
+            doc.metadata.get("page")
+            for doc in result["source_documents"]
+        )
+    )
+    return {
+        "answer": result["result"],
+        "pages": pages,
+        "sources": sources
+    }
