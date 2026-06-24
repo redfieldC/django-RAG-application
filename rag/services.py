@@ -5,12 +5,25 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain_chroma import Chroma
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain.chains import (
+    RetrievalQA, 
+    create_history_aware_retriever,
+    create_retrieval_chain
+)
+from langchain.chains.combine_documents import (
+    create_stuff_documents_chain
+)
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.prompts import MessagesPlaceholder
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from pathlib import Path
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever
+from langchain_core.messages import (
+    HumanMessage,
+    AIMessage
+)
+
 
 
 def get_embeddings():
@@ -62,11 +75,13 @@ def ingest_document(file_path: str, collection_name: str) -> int:
     return len(chunks)
 
 
-def query_document(question: str, collection_name: str, filename: str = None, chat_history="") -> dict:
+def query_document(question: str, collection_name: str, filename: str = None, chat_history=None) -> dict:
     """
     Query against stored document chunks using RAG.
     Returns LLM answer based on retrieved context.
     """
+    if chat_history is None:
+        chat_history = []
     # Step 1: Load existing ChromaDB collection
     embeddings = get_embeddings()
     vectorstore = Chroma(
@@ -83,31 +98,52 @@ def query_document(question: str, collection_name: str, filename: str = None, ch
         api_key=settings.GROQ_API_KEY
     )
 
-    # Step 3: Define prompt
-    prompt_template = """
-    You are a helpful assistant.
 
-    The question may depend on previous conversation history.
+    contextualize_q_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """
+                Given a chat history and the latest user question,
+                formulate a standalone question which can be understood
+                without the chat history.
 
-    Use the provided context to answer the user's question.
+                Do NOT answer the question.
 
-    If the current question references something mentioned earlier
-    (for example: "it", "that", "they", "which one"),
-    use the previous conversation contained in the question.
-
-    Context:
-    {context}
-
-    Question:
-    {question}
-
-    Answer:
-    """
-
-    prompt = PromptTemplate(
-        template=prompt_template,
-        input_variables=["context", "question"]
+                Only rewrite it if needed.
+                """
+            ),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}")
+        ]
     )
+
+    qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """
+                You are a helpful assistant.
+
+                Answer ONLY using the information present
+                in the provided context.
+
+                Do not use external knowledge.
+
+                If the answer cannot be found in the context,
+                respond with:
+
+                "I could not find that information in the document."
+
+                Context:
+                {context}
+                """
+            ),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}")
+        ]
+    )
+
 
     search_kwargs = {"k": 4}
 
@@ -132,29 +168,49 @@ def query_document(question: str, collection_name: str, filename: str = None, ch
         retriever=retriever,
         llm=llm
     )
-        
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",  # "stuff" = put all chunks into one prompt
-        retriever=multi_query_retriever,
-        chain_type_kwargs={"prompt": prompt},
-        return_source_documents=True
+    
+    history_aware_retriever = create_history_aware_retriever(
+        llm,
+        multi_query_retriever,
+        contextualize_q_prompt
     )
 
-    question_with_history = f"""
-    Previous Conversation:
+    rewriter_chain = contextualize_q_prompt | llm
 
-    {chat_history}
+    rewritten_question = rewriter_chain.invoke(
+        {
+            "input": question,
+            "chat_history": chat_history
+        }
+    )
 
-    Current Question:
+    print("\n" + "=" * 50)
+    print("REWRITTEN QUESTION:")
+    print(rewritten_question.content)
+    print("=" * 50 + "\n")
 
-    {question}
-    """
+    question_answer_chain = create_stuff_documents_chain(
+        llm,
+        qa_prompt
+    )
+    rag_chain = create_retrieval_chain(
+        history_aware_retriever,
+        question_answer_chain
+    )
 
-    result = qa_chain.invoke({"query": question_with_history})
+    result = rag_chain.invoke(
+        {
+            "input": question,
+            "chat_history": chat_history
+        }
+    )
+
+    print("=" * 50)
+    print(result)
+    print("=" * 50)
     sources = []
 
-    for doc in result["source_documents"]:
+    for doc in result["context"]:
         sources.append({
             "filename": doc.metadata.get("filename", "Unknown"),
             "page": doc.metadata.get("page", "Unknown"),
@@ -164,11 +220,11 @@ def query_document(question: str, collection_name: str, filename: str = None, ch
     pages = sorted(
         set(
             doc.metadata.get("page")
-            for doc in result["source_documents"]
+            for doc in result["context"]
         )
     )
     return {
-        "answer": result["result"],
+        "answer": result["answer"],
         "pages": pages,
         "sources": sources
     }

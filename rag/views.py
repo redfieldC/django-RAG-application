@@ -5,7 +5,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
-
+from langchain_core.messages import (
+    HumanMessage,
+    AIMessage
+)
 from .models import Document, ChatHistory
 from .serializers import DocumentSerializer, DocumentUploadSerializer, QuerySerializer
 from .services import ingest_document, query_document
@@ -92,12 +95,19 @@ class QueryView(APIView):
             document=doc
         ).order_by("-created_at")[:10]
 
-        chat_history = "\n".join(
-            [
-                f"{item.role}: {item.message}"
-                for item in reversed(history)
-            ]
-        )
+        chat_history = []
+
+        for item in reversed(history):
+
+            if item.role == "user":
+                chat_history.append(
+                    HumanMessage(content=item.message)
+                )
+
+            else:
+                chat_history.append(
+                    AIMessage(content=item.message)
+                )
         
         try:
             response  = query_document(question, doc.collection_name, chat_history=chat_history)
