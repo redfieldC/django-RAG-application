@@ -9,7 +9,8 @@ from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from pathlib import Path
-
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
 
 
 def get_embeddings():
@@ -61,7 +62,7 @@ def ingest_document(file_path: str, collection_name: str) -> int:
     return len(chunks)
 
 
-def query_document(question: str, collection_name: str, filename: str = None) -> dict:
+def query_document(question: str, collection_name: str, filename: str = None, chat_history="") -> dict:
     """
     Query against stored document chunks using RAG.
     Returns LLM answer based on retrieved context.
@@ -83,17 +84,25 @@ def query_document(question: str, collection_name: str, filename: str = None) ->
     )
 
     # Step 3: Define prompt
-    prompt_template = """You are a helpful assistant answering questions based on the provided context.
-    Synthesize information from the context to give a complete answer.
-    If the context contains relevant information, use it even if the exact phrase from the question isn't present.
-    Only say you lack information if the context genuinely contains nothing relevant.
+    prompt_template = """
+    You are a helpful assistant.
+
+    The question may depend on previous conversation history.
+
+    Use the provided context to answer the user's question.
+
+    If the current question references something mentioned earlier
+    (for example: "it", "that", "they", "which one"),
+    use the previous conversation contained in the question.
 
     Context:
     {context}
 
-    Question: {question}
+    Question:
+    {question}
 
-    Answer:"""
+    Answer:
+    """
 
     prompt = PromptTemplate(
         template=prompt_template,
@@ -132,7 +141,17 @@ def query_document(question: str, collection_name: str, filename: str = None) ->
         return_source_documents=True
     )
 
-    result = qa_chain.invoke({"query": question})
+    question_with_history = f"""
+    Previous Conversation:
+
+    {chat_history}
+
+    Current Question:
+
+    {question}
+    """
+
+    result = qa_chain.invoke({"query": question_with_history})
     sources = []
 
     for doc in result["source_documents"]:
@@ -141,7 +160,7 @@ def query_document(question: str, collection_name: str, filename: str = None) ->
             "page": doc.metadata.get("page", "Unknown"),
             "content": doc.page_content[:200]
         })
-        
+
     pages = sorted(
         set(
             doc.metadata.get("page")

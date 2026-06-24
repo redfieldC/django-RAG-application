@@ -16,3 +16,23 @@ class Document(models.Model):
 
     class Meta:
         ordering = ['-uploaded_at']
+
+
+class ChatHistory(models.Model):
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE
+    )
+
+    role = models.CharField(
+        max_length=20
+    )
+
+    message = models.TextField()
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    class Meta:
+        ordering = ["created_at"]

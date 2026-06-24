@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
 
-from .models import Document
+from .models import Document, ChatHistory
 from .serializers import DocumentSerializer, DocumentUploadSerializer, QuerySerializer
 from .services import ingest_document, query_document
 
@@ -82,13 +82,36 @@ class QueryView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        ChatHistory.objects.create(
+            document=doc,
+            role="user",
+            message=question
+        )
+
+        history = ChatHistory.objects.filter(
+            document=doc
+        ).order_by("-created_at")[:10]
+
+        chat_history = "\n".join(
+            [
+                f"{item.role}: {item.message}"
+                for item in reversed(history)
+            ]
+        )
+        
         try:
-            response  = query_document(question, doc.collection_name)
+            response  = query_document(question, doc.collection_name, chat_history=chat_history)
         except Exception as e:
             return Response(
                 {"error": f"Query failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+        
+        ChatHistory.objects.create(
+            document=doc,
+            role="assistant",
+            message=response["answer"]
+        )
 
         return Response({
             "document": doc.title,
